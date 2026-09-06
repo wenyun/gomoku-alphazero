@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gomoku — AlphaZero</title>
+<style>
+  :root { --wood:#e3b96b; --line:#7a5320; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         background:#15171c; color:#e6e8ec; display:flex; justify-content:center;
+         align-items:flex-start; padding:24px; gap:24px; }
+  h1 { font-size:18px; margin:0 0 4px; font-weight:600; }
+  .sub { color:#8b919c; font-size:12px; margin-bottom:16px; }
+  #board { background:var(--wood); border-radius:6px; box-shadow:0 8px 30px #0008; cursor:pointer; display:block; }
+  .panel { width:290px; }
+  .card { background:#1e2128; border:1px solid #2c3038; border-radius:8px; padding:14px; margin-bottom:12px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:#8b919c; margin:0 0 10px; font-weight:600; }
+  label { display:block; font-size:12px; color:#8b919c; margin:10px 0 4px; }
+  select, button { width:100%; padding:8px 10px; border-radius:6px; border:1px solid #363b45;
+                   background:#262a32; color:#e6e8ec; font:inherit; }
+  button { cursor:pointer; margin-top:8px; }
+  button:hover { background:#2f343e; }
+  button.primary { background:#3d6df0; border-color:#3d6df0; font-weight:600; }
+  button.primary:hover { background:#4d7bf5; }
+  button:disabled { opacity:.45; cursor:default; }
+  .bar { height:8px; border-radius:4px; background:#2c3038; overflow:hidden; margin:6px 0 2px; }
+  .bar > div { height:100%; background:linear-gradient(90deg,#3d6df0,#7aa2ff); transition:width .3s; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td { padding:3px 0; font-size:12px; }
+  td.c { color:#e6e8ec; font-weight:600; } td.n { text-align:right; color:#8b919c; }
+  .status { font-size:13px; padding:10px; border-radius:6px; background:#262a32; text-align:center; }
+  .status.win { background:#1b4332; color:#7ae2a8; } .status.lose { background:#4a1f24; color:#ff9aa2; }
+  .kv { display:flex; justify-content:space-between; font-size:12px; color:#8b919c; }
+  .kv b { color:#e6e8ec; font-weight:600; }
+</style>
+</head>
+<body>
+<canvas id="board" width="620" height="620"></canvas>
+
+<div class="panel">
+  <h1>Gomoku</h1>
+  <div class="sub">AlphaZero-style engine — policy/value net + MCTS</div>
+
+  <div class="card">
+    <div id="status" class="status">Choose a colour and press New game.</div>
+    <label>Your colour</label>
+    <select id="colour"><option value="black">Black (moves first)</option>
+                        <option value="white">White</option></select>
+    <label>Engine strength (simulations per move)</label>
+    <select id="sims">
+      <option value="200">200 — fast</option>
+      <option value="800" selected>800 — normal</option>
+      <option value="2000">2000 — strong</option>
+      <option value="4000">4000 — maximum (slow)</option>
+    </select>
+    <button class="primary" id="new">New game</button>
+    <button id="undo">Undo my last move</button>
+    <button id="hint">Show me the engine's suggestion</button>
+  </div>
+
+  <div class="card">
+    <h2>Engine evaluation</h2>
+    <div class="kv"><span id="wplabel">Win probability</span><b id="wp">—</b></div>
+    <div class="bar"><div id="wpbar" style="width:50%"></div></div>
+    <div class="kv" style="margin-top:8px"><span>Last move</span><b id="lastmv">—</b></div>
+    <div class="kv"><span>Think time</span><b id="ttime">—</b></div>
+  </div>
+
+  <div class="card">
+    <h2>Moves considered</h2>
+    <table id="top"><tr><td class="n" colspan="3" style="text-align:center">—</td></tr></table>
+  </div>
+</div>
+
+<script>
+const N = 15, PAD = 26, canvas = document.getElementById("board"),
+      ctx = canvas.getContext("2d"), STEP = (canvas.width - 2*PAD) / (N - 1);
+let state = null, busy = false, hintMove = null;
+
+const coord = a => String.fromCharCode(65 + (a % N)) + (N - Math.floor(a / N));
+
+function draw() {
+  ctx.fillStyle = "#e3b96b"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#7a5320"; ctx.lineWidth = 1; ctx.fillStyle = "#7a5320";
+  ctx.font = "10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let i = 0; i < N; i++) {
+    const p = PAD + i * STEP;
+    ctx.beginPath(); ctx.moveTo(PAD, p); ctx.lineTo(canvas.width - PAD, p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p, PAD); ctx.lineTo(p, canvas.height - PAD); ctx.stroke();
+    ctx.fillText(String.fromCharCode(65 + i), p, 12);
+    ctx.fillText(String(N - i), 12, p);
+  }
+  // Star points, as on a real board.
+  for (const [r, c] of [[3,3],[3,11],[11,3],[11,11],[7,7]]) {
+    ctx.beginPath(); ctx.arc(PAD + c*STEP, PAD + r*STEP, 3, 0, 7); ctx.fill();
+  }
+  if (!state) return;
+
+  if (hintMove !== null && state.stones[hintMove] === 0) {
+    const r = Math.floor(hintMove / N), c = hintMove % N;
+    ctx.strokeStyle = "#3d6df0"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(PAD + c*STEP, PAD + r*STEP, STEP*0.42, 0, 7); ctx.stroke();
+  }
+  for (let a = 0; a < N*N; a++) {
+    const v = state.stones[a]; if (!v) continue;
+    const r = Math.floor(a / N), c = a % N, x = PAD + c*STEP, y = PAD + r*STEP;
+    const g = ctx.createRadialGradient(x-4, y-4, 2, x, y, STEP*0.46);
+    if (v === 1) { g.addColorStop(0, "#555"); g.addColorStop(1, "#000"); }
+    else { g.addColorStop(0, "#fff"); g.addColorStop(1, "#c9ccd1"); }
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, STEP*0.44, 0, 7); ctx.fill();
+    if (a === state.last_move) {
+      ctx.strokeStyle = "#e2413f"; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, STEP*0.18, 0, 7); ctx.stroke();
+    }
+  }
+}
+
+function render() {
+  draw();
+  const s = document.getElementById("status");
+  if (!state) return;
+  if (state.is_over) {
+    if (state.winner === 0) { s.className = "status"; s.textContent = "Draw."; }
+    else {
+      const humanWon = state.winner === state.human_colour;
+      s.className = "status " + (humanWon ? "win" : "lose");
+      s.textContent = humanWon ? "You win!" : "The engine wins.";
+    }
+  } else if (busy) { s.className = "status"; s.textContent = "Engine is thinking…"; }
+  else {
+    s.className = "status";
+    s.textContent = state.to_play === state.human_colour ? "Your turn." : "Engine's turn.";
+  }
+
+  const ai = state.ai, tbody = document.getElementById("top");
+  if (ai) {
+    // The evaluation belongs to whoever was to move when it was computed, which
+    // is the human for a hint and the engine for its own move.
+    const mine = ai.for_player === state.human_colour;
+    document.getElementById("wplabel").textContent =
+      mine ? "Your win probability" : "Engine win probability";
+    document.getElementById("wp").textContent = (ai.win_probability*100).toFixed(1) + "%";
+    document.getElementById("wpbar").style.width = (ai.win_probability*100).toFixed(1) + "%";
+    document.getElementById("lastmv").textContent = ai.coord + (ai.is_hint ? " (suggested)" : "");
+    document.getElementById("ttime").textContent =
+      ai.seconds.toFixed(2) + " s / " + ai.simulations + " sims";
+    tbody.innerHTML = ai.top.map(t =>
+      `<tr><td class="c">${t.coord}</td><td class="n">${(t.share*100).toFixed(1)}%</td>` +
+      `<td class="n">Q ${t.q >= 0 ? "+" : ""}${t.q.toFixed(2)}</td></tr>`).join("");
+  } else {
+    // Undo clears the analysis; blank the panel rather than leave stale numbers.
+    document.getElementById("wplabel").textContent = "Win probability";
+    document.getElementById("wp").textContent = "—";
+    document.getElementById("wpbar").style.width = "50%";
+    document.getElementById("lastmv").textContent = "—";
+    document.getElementById("ttime").textContent = "—";
+    tbody.innerHTML = `<tr><td class="n" colspan="3" style="text-align:center">—</td></tr>`;
+  }
+}
+
+async function post(url, body) {
+  busy = true; render();
+  try {
+    const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"},
+                                 body: JSON.stringify(body || {})});
+    state = await res.json();
+  } finally { busy = false; render(); }
+}
+
+canvas.addEventListener("click", async e => {
+  if (busy || !state || state.is_over) return;
+  if (state.to_play !== state.human_colour) return;
+  const box = canvas.getBoundingClientRect();
+  const c = Math.round(((e.clientX - box.left) * canvas.width/box.width - PAD) / STEP);
+  const r = Math.round(((e.clientY - box.top) * canvas.height/box.height - PAD) / STEP);
+  if (r < 0 || r >= N || c < 0 || c >= N) return;
+  const a = r*N + c;
+  if (state.stones[a] !== 0) return;
+  hintMove = null;
+  await post("/api/move", {move: a});
+});
+
+document.getElementById("new").onclick = () => {
+  hintMove = null;
+  post("/api/new", {human: document.getElementById("colour").value,
+                    sims: parseInt(document.getElementById("sims").value)});
+};
+document.getElementById("undo").onclick = () => { hintMove = null; post("/api/undo"); };
+document.getElementById("hint").onclick = async () => {
+  await post("/api/hint");
+  hintMove = state.ai ? state.ai.move : null;
+  render();
+};
+
+draw();
+</script>
+</body>
+</html>

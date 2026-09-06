@@ -1,0 +1,47 @@
+{
+  "net": {
+    "channels": 128,
+    "blocks": 10,
+    "head_channels": 32,
+    "value_hidden": 128
+  },
+  "mcts": {
+    "simulations": 512,
+    "c_puct": 2.0,
+    "dirichlet_alpha": 0.15,
+    "dirichlet_epsilon": 0.25,
+    "opening_moves": 12,
+    "late_temperature": 0.25
+  },
+  "selfplay": {
+    "workers_per_gpu": 6,
+    "games_per_worker": 96,
+    "gpus": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "reload_every_moves": 20
+  },
+  "train": {
+    "batch_size": 1024,
+    "lr": 0.001,
+    "warmup_steps": 1000,
+    "lr_milestones": [
+      80000,
+      140000
+    ],
+    "weight_decay": 0.0001,
+    "value_loss_weight": 1.0,
+    "buffer_capacity": 3000000,
+    "min_buffer": 40000,
+    "max_reuse_per_position": 6.0,
+    "checkpoint_every": 500,
+    "snapshot_every": 5000,
+    "log_every": 100
+  }
+}

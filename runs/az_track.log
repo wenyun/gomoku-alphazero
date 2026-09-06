@@ -1,0 +1,5 @@
+anchor = step_0005000.pt
+step_0005000.pt: score  58.3% vs anchor  elo     +58  len 36.2  (77s)
+step_0010000.pt: score  85.4% vs anchor  elo    +307  len 40.9  (52s)
+step_0015000.pt: score  85.4% vs anchor  elo    +307  len 36.7  (49s)
+step_0020000.pt: score 100.0% vs anchor  elo    +791  len 36.0  (37s)

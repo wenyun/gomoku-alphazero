@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Training artifacts.
+#
+# The final weights (runs/az/latest.pt, ~12 MB) and all the training logs are
+# committed on purpose -- they are what makes the results reproducible.  The 30
+# intermediate snapshots are not: they are ~12 MB each, ~357 MB in total, and
+# only exist so the Elo ladder could be measured after the fact.
+runs/az/step_*.pt
+runs/az/*.tmp
+runs/serve.log
